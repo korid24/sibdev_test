@@ -1,0 +1,19 @@
+version: "3.7"
+
+services:
+  db:
+    image: postgres:12
+    environment:
+      POSTGRES_USER: sibdev_test
+      POSTGRES_PASSWORD: sdtestpass
+      POSTGRES_DB: sibdev_test
+  handler:
+    container_name: csv_handler_korid
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    command: bash -c "gunicorn --bind :8000 --threads 5 config.wsgi:application"
+    ports:
+      - 8000:8000
+    depends_on:
+      - db
