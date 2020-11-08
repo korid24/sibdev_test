@@ -16,9 +16,15 @@ class DealSerializer(serializers.ModelSerializer):
     """
     customer = serializers.CharField()
 
+    def __init__(self, *args, **kwargs):
+        self.users_dict: dict = {}
+        super(DealSerializer, self).__init__(*args, **kwargs)
+
     def validate_customer(self, value: str) -> User:
-        user, _ = User.objects.get_or_create(username=value)
-        return user
+        if not self.users_dict.get(value):
+            user, _ = User.objects.get_or_create(username=value)
+            self.users_dict[value] = user
+        return self.users_dict[value]
 
     class Meta:
         model = Deal
