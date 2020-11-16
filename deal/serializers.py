@@ -6,8 +6,11 @@ from .models import Deal
 
 class DealListSerializer(serializers.ListSerializer):
     def create(self, validated_data):
-        feed_list = [Deal(**item) for item in validated_data]
-        return Deal.objects.bulk_create(feed_list)
+        """
+        Создание нескольких объектов в бд одним запросом
+        """
+        deals_list = [Deal(**item) for item in validated_data]
+        return Deal.objects.bulk_create(deals_list)
 
 
 class DealSerializer(serializers.ModelSerializer):
