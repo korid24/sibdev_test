@@ -1,63 +1,72 @@
-from typing import List, NoReturn
+from decimal import Decimal
+from typing import List, TypedDict, Union, NoReturn
 
-from django.db.models import Sum, QuerySet, F
+from django.db.models import Sum, F
+from django.contrib.auth.models import User
 
 from ..models import Deal
 
 
-INTERSECTIONS: set = set()
-
-
-def get_top_customers_queryset() -> QuerySet:
+class CustomerInfo(TypedDict):
     """
-    Возвращает queryset из логинов 5ти клиентов с наибольшей суммой
-    сделок за все время и суммой их сделок
+    Информация о клиенте для ответа на get запрос
     """
-    return (Deal.objects.annotate(username=F('customer__username'))
-            .values('username')
-            .annotate(spent_money=Sum('total'))
-            .order_by('-spent_money')[:5])
+    username: str
+    spent_money: Decimal
+    gems: Union[set, list]
 
 
 def get_top_customers_usernames() -> List[str]:
     """
     Возвращает логины 5ти клиентов с наибольшей суммой сделок за все время
     """
-    queryset = get_top_customers_queryset()
+    queryset = (Deal.objects.annotate(username=F('customer__username'))
+                .values('username')
+                .annotate(spent_money=Sum('total'))
+                .order_by('-spent_money')[:5])
     return queryset.values_list('username')
 
 
-def get_gems_intersections() -> NoReturn:
+def get_intersections(customers_list: List[CustomerInfo]) -> set:
     """
-    Определяет множество позиций приобретенных хотя бы 2мя из 5ти
-    топовых клиентов
+    Возвращает множество камней, которые купили как минимум двое из списка
+    "5 клиентов, потративших наибольшую сумму за весь период"
     """
-    gems_of_top = (Deal.objects.values('customer__username', 'item')
-                   .filter(customer__username__in=get_top_customers_usernames())
-                   .distinct()).order_by('customer__username')
-    gems = [gem['item'] for gem in gems_of_top]
-    not_unique_gems = [gem for gem in gems if gems.count(gem) > 1]
-    global INTERSECTIONS
-    INTERSECTIONS = set(not_unique_gems)
+    gems_list = []
+    for customer in customers_list:
+        gems_list += list(customer['gems'])
+    not_unique_gems = [gem for gem in gems_list if gems_list.count(gem) > 1]
+    return set(not_unique_gems)
 
 
-def get_user_intersections_gems(username: str) -> List[str]:
+def get_final_customers_list(customers_list: List[CustomerInfo],
+                             not_unique_gems: set) -> List[CustomerInfo]:
     """
-    Возвращает список позиций приобретённых клиентом и входящих во
-    множество позиций приобретенных хотя бы 2мя из 5ти
-    топовых клиентов
+    Возвращает изменённый список пользователей, в котором в поле gems
+    отображается список из названий камней, которые купили как минимум двое из
+    списка "5 клиентов, потративших наибольшую сумму за весь период", и данный
+    клиент является одним из этих покупателей.
     """
-    queryset = (Deal.objects.filter(customer__username=username)
-                .values_list('item').distinct())
-    gems_set = set([gem[0] for gem in queryset])
-    return list(gems_set.intersection(INTERSECTIONS))
+    for customer in customers_list:
+        customer['gems'] = sorted(
+            customer['gems'].intersection(not_unique_gems))
+    return sorted(
+        customers_list, key=lambda el: el['spent_money'], reverse=True)
 
 
-def get_response() -> List[dict]:
-    """Возвращает ответ на get запрос"""
-    get_gems_intersections()
-    top_customers = list(get_top_customers_queryset())
-    for customer in top_customers:
-        name = customer['username']
-        customer.update({'gems': get_user_intersections_gems(name)})
-    return top_customers
+def get_response() -> List[CustomerInfo]:
+    """
+    Формирует ответ на get запрос
+    """
+    customers = User.objects.filter(
+        username__in=get_top_customers_usernames()).prefetch_related('deals')
+    customers_list = []
+    for user in customers:
+        customer_info = CustomerInfo(
+            username=user.username,
+            spent_money=sum([deal.total for deal in user.deals.all()]),
+            gems=set([deal.item for deal in user.deals.all()]))
+        customers_list.append(customer_info)
+    not_unique_gems = get_intersections(customers_list)
+    result = get_final_customers_list(customers_list, not_unique_gems)
+    return result
